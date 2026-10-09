@@ -68,6 +68,7 @@ func RegisterBuiltIns(registry *Registry) {
 	registerBuiltIn(registry, "seafile", NewSeaFileConnector)
 	registerBuiltIn(registry, "bigquery", NewBigQueryConnector)
 	registerBuiltIn(registry, "zotero", NewZoteroConnector)
+	registerBuiltIn(registry, "mayday", NewMaydayConnector)
 }
 
 func registerBuiltIn[T Connector](registry *Registry, source string, factory func(map[string]any) (T, error)) {

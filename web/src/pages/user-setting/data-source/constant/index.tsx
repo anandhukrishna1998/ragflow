@@ -78,6 +78,7 @@ export enum DataSourceKey {
   TEAMS = 'teams',
   SLACK = 'slack',
   SHAREPOINT = 'sharepoint',
+  MAYDAY = 'mayday',
 }
 
 type DataSourceFeatureVisibility = {
@@ -150,6 +151,9 @@ export const DataSourceFeatureVisibilityMap: Partial<
     syncDeletedFiles: true,
   },
   [DataSourceKey.ZENDESK]: {
+    syncDeletedFiles: true,
+  },
+  [DataSourceKey.MAYDAY]: {
     syncDeletedFiles: true,
   },
   [DataSourceKey.ZOTERO]: {
@@ -377,6 +381,11 @@ export const generateDataSourceInfo = (t: TFunction) => {
       name: 'Zendesk',
       description: t(`setting.${DataSourceKey.ZENDESK}Description`),
       icon: <SvgIcon name={'data-source/zendesk'} width={38} />,
+    },
+    [DataSourceKey.MAYDAY]: {
+      name: 'Mayday',
+      description: t(`setting.${DataSourceKey.MAYDAY}Description`),
+      icon: <SvgIcon name={'data-source/mayday'} width={38} />,
     },
     [DataSourceKey.ZOTERO]: {
       name: 'Zotero',
@@ -1495,6 +1504,49 @@ const generateDataSourceFormFields = (t: TFunction) => ({
       ],
     },
   ],
+  [DataSourceKey.MAYDAY]: [
+    {
+      label: t('setting.dataSourceFieldMaydayClientId'),
+      name: 'config.credentials.client_id',
+      type: FormFieldType.Text,
+      required: true,
+      placeholder: 'client_id',
+    },
+    {
+      label: t('setting.dataSourceFieldMaydayClientSecret'),
+      name: 'config.credentials.client_secret',
+      type: FormFieldType.Password,
+      required: true,
+    },
+    {
+      label: t('setting.dataSourceFieldMaydayBaseUrl'),
+      name: 'config.base_url',
+      type: FormFieldType.Text,
+      required: false,
+      placeholder: 'https://api.mayday.fr/v1',
+    },
+    {
+      label: t('setting.dataSourceFieldMaydayTokenUrl'),
+      name: 'config.token_url',
+      type: FormFieldType.Text,
+      required: false,
+      placeholder: 'https://api.mayday.fr/oauth/token',
+    },
+    {
+      label: t('setting.dataSourceFieldMaydayCollections'),
+      name: 'config.collections',
+      type: FormFieldType.Text,
+      required: false,
+      placeholder: 'Billing, Support',
+    },
+    {
+      label: t('setting.dataSourceFieldMaydayLanguages'),
+      name: 'config.languages',
+      type: FormFieldType.Text,
+      required: false,
+      placeholder: 'fr, en',
+    },
+  ],
   [DataSourceKey.ZOTERO]: [
     {
       label: t('setting.dataSourceFieldZoteroUserId'),
@@ -2599,6 +2651,21 @@ export const DataSourceFormDefaultValues = {
         zendesk_subdomain: '',
         zendesk_email: '',
         zendesk_token: '',
+      },
+    },
+  },
+  [DataSourceKey.MAYDAY]: {
+    name: '',
+    source: DataSourceKey.MAYDAY,
+    config: {
+      name: '',
+      base_url: 'https://api.mayday.fr/v1',
+      token_url: 'https://api.mayday.fr/oauth/token',
+      collections: '',
+      languages: '',
+      credentials: {
+        client_id: '',
+        client_secret: '',
       },
     },
   },
