@@ -769,3 +769,22 @@ Use Zotero to synchronize PDF attachments from a Zotero library into a RAGFlow D
 Click **Test connection** with the completed settings, then **Confirm** to create the connection. Link it to a Dataset using [Add to a Dataset and Sync](./add_to_knowledge_base_and_sync.md). Check synchronization logs and document parsing results on a small sample before importing a large library.
 
 ![Zotero connector configuration](https://raw.githubusercontent.com/infiniflow/ragflow-docs/main/images/data_source_zotero_configuration.jpg)
+
+## Mayday
+
+The Mayday data source is used to connect to Mayday (https://www.mayday.fr) and synchronize knowledge base articles and collections to a RAGFlow knowledge base. After configuration, customer support articles and team procedures can be searched and referenced in RAGFlow.
+
+**Permission requirements**: An active Mayday OAuth 2.0 app with read permissions for knowledge base articles and collections.
+
+**Account version requirements**: A Mayday account with API access and valid OAuth 2.0 Client Credentials (`client_id` and `client_secret`).
+
+**Configuration parameters**:
+
+- **Name**: Customize the name in RAGFlow to identify this Mayday connection.
+- **Client ID**: Fill in the Mayday OAuth client ID.
+- **Client secret**: Fill in the Mayday OAuth client secret.
+- **API base URL**: Fill in the Mayday API base URL (default: `https://api.mayday.fr/v1`).
+- **OAuth token URL**: Fill in the Mayday OAuth 2.0 token endpoint (default: `https://api.mayday.fr/oauth/token`).
+- **Collections**: Optional. Comma-separated collection IDs or names to limit synchronization scope. Leave blank to sync all collections.
+- **Languages**: Optional. Comma-separated language codes (e.g., `fr`, `en`) to filter articles. Leave blank to sync all languages.
+- **Sync deleted files**: After this is enabled, articles deleted or removed from Mayday are automatically tombstoned and removed from the knowledge base index.
