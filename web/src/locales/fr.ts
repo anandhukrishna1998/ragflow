@@ -1484,6 +1484,14 @@ Exemple : Virtual Hosted Style`,
         "Adresse e-mail disposant d'un accès au contenu Drive à synchroniser",
       zendeskDescription:
         'Connectez votre Zendesk pour synchroniser les tickets, articles et autres contenus.',
+      maydayDescription:
+        'Connectez votre base de connaissances Mayday pour synchroniser les articles et collections du service client.',
+      dataSourceFieldMaydayClientId: 'Identifiant client (Client ID)',
+      dataSourceFieldMaydayClientSecret: 'Secret client (Client secret)',
+      dataSourceFieldMaydayBaseUrl: 'URL de base de l\'API',
+      dataSourceFieldMaydayTokenUrl: 'URL du jeton OAuth',
+      dataSourceFieldMaydayCollections: 'Collections',
+      dataSourceFieldMaydayLanguages: 'Langues',
       google_driveMyDriveEmailsTip:
         'E-mails séparés par des virgules dont le contenu "Mon Drive" doit être indexé (inclure l\'administrateur principal).',
       google_driveSharedFoldersTip:

@@ -841,6 +841,7 @@ export default {
       azure_devopsDescription: '連接 Azure DevOps 以同步儲存庫檔案和拉取請求。',
       bitbucketDescription: '連接 Bitbucket，同步 PR 內容。',
       zendeskDescription: '連接 Zendesk，同步工單、文章及其他內容。',
+      maydayDescription: '連接 Mayday 知識庫，同步客戶服務文章和合集。',
       bitbucketTopWorkspaceTip:
         '要索引的 Bitbucket 工作區（例如：https://bitbucket.org/atlassian/workspace 中的 "atlassian"）',
       bitbucketWorkspaceTip: '此連接器將索引工作區下的所有倉庫。',
