@@ -1447,6 +1447,12 @@ This auto-tagging feature enhances retrieval by adding another layer of domain-s
       dataSourceFieldZendeskDomain: 'Zendesk Domain',
       dataSourceFieldZendeskEmail: 'Zendesk Email',
       dataSourceFieldZendeskToken: 'Zendesk Token',
+      dataSourceFieldMaydayClientId: 'Client ID',
+      dataSourceFieldMaydayClientSecret: 'Client secret',
+      dataSourceFieldMaydayBaseUrl: 'API base URL',
+      dataSourceFieldMaydayTokenUrl: 'OAuth token URL',
+      dataSourceFieldMaydayCollections: 'Collections',
+      dataSourceFieldMaydayLanguages: 'Languages',
       dataSourceFieldContent: 'Content',
       dataSourceFieldDatabase: 'Database',
       dataSourceFieldSqlQuery: 'SQL Query',
@@ -1661,6 +1667,8 @@ Example: Virtual Hosted Style`,
         'Email address that has access to the Drive content being synced',
       zendeskDescription:
         'Connect your Zendesk to sync tickets, articles, and other content.',
+      maydayDescription:
+        'Connect your Mayday knowledge base to sync customer service articles and collections.',
       zoteroDescription:
         'Connect your Zotero library to sync PDF attachments from papers and references.',
       dataSourceFieldZoteroUserId: 'Zotero user ID',
