@@ -568,7 +568,7 @@ func (s *Service) ListUserAPITokens(ctx context.Context, username string) ([]map
 	}
 
 	// 2. Get user's tenants
-	userTenants, err := s.userTenantDAO.GetByUserID(ctx, dao.DB, user.ID)
+	userTenants, err := s.userTenantDAO.GetByUserIDAndRole(ctx, dao.DB, user.ID, "owner")
 	if err != nil || len(userTenants) == 0 {
 		return nil, fmt.Errorf("tenant not found")
 	}
@@ -585,6 +585,7 @@ func (s *Service) ListUserAPITokens(ctx context.Context, username string) ([]map
 	result := make([]map[string]interface{}, 0, len(tokens))
 	for _, token := range tokens {
 		result = append(result, map[string]interface{}{
+			"user_id":     token.UserID,
 			"tenant_id":   token.TenantID,
 			"token":       token.Token,
 			"beta":        token.Beta,
@@ -609,7 +610,7 @@ func (s *Service) GenerateUserAPIToken(ctx context.Context, username string) (ma
 	}
 
 	// 2. Get user's tenants
-	userTenants, err := s.userTenantDAO.GetByUserID(ctx, dao.DB, user.ID)
+	userTenants, err := s.userTenantDAO.GetByUserIDAndRole(ctx, dao.DB, user.ID, "owner")
 	if err != nil || len(userTenants) == 0 {
 		return nil, fmt.Errorf("tenant not found")
 	}
@@ -622,6 +623,7 @@ func (s *Service) GenerateUserAPIToken(ctx context.Context, username string) (ma
 
 	apiToken := &entity.APIToken{
 		TenantID: tenantID,
+		UserID:   &user.ID,
 		Token:    key,
 		Beta:     &beta,
 	}
@@ -632,6 +634,7 @@ func (s *Service) GenerateUserAPIToken(ctx context.Context, username string) (ma
 	}
 
 	return map[string]interface{}{
+		"user_id":     user.ID,
 		"tenant_id":   tenantID,
 		"token":       key,
 		"beta":        beta,
@@ -651,7 +654,7 @@ func (s *Service) DeleteUserAPIToken(ctx context.Context, username, key string) 
 	}
 
 	// 2. Get user's tenants
-	userTenants, err := s.userTenantDAO.GetByUserID(ctx, dao.DB, user.ID)
+	userTenants, err := s.userTenantDAO.GetByUserIDAndRole(ctx, dao.DB, user.ID, "owner")
 	if err != nil || len(userTenants) == 0 {
 		return fmt.Errorf("tenant not found")
 	}
@@ -1218,13 +1221,12 @@ func (s *Service) GetSandboxProviderSchema(providerID string) (map[string]interf
 }
 
 // GetSandboxConfig get sandbox config
-func (s *Service) GetSandboxConfig(ctx context.Context) (map[string]interface{}, error) {
+func (s *Service) GetSandboxConfig(ctx context.Context, providerType string) (map[string]interface{}, error) {
 	settings, err := s.systemSettingsDAO.GetByNamePrefix(ctx, dao.DB, "sandbox.")
 	if err != nil {
 		return nil, err
 	}
 
-	providerType := "self_managed"
 	values := make(map[string]string, len(settings))
 	for _, setting := range settings {
 		if _, exists := values[setting.Name]; exists {
@@ -1232,8 +1234,11 @@ func (s *Service) GetSandboxConfig(ctx context.Context) (map[string]interface{},
 		}
 		values[setting.Name] = setting.Value
 	}
-	if value, exists := values["sandbox.provider_type"]; exists {
-		providerType = value
+	if providerType == "" {
+		providerType = "self_managed"
+		if value, exists := values["sandbox.provider_type"]; exists {
+			providerType = value
+		}
 	}
 	schema, err := sandbox.ConfigSchema(providerType)
 	if err != nil {

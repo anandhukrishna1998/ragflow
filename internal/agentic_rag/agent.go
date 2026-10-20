@@ -24,6 +24,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cloudwego/eino/adk"
@@ -34,7 +35,9 @@ import (
 
 	"ragflow/internal/agent/runtime"
 	"ragflow/internal/common"
+	"ragflow/internal/engine"
 	"ragflow/internal/entity/models"
+	"ragflow/internal/tokenizer"
 )
 
 // Input carries everything Run needs to spin up a one-shot ReAct conversation
@@ -70,6 +73,17 @@ type Input struct {
 	// DatasetIDs is the conversation's bound dataset scope, decided by the
 	// session created in the UI. It is injected into the retrieval tools.
 	DatasetIDs []string
+	// DocIDs is the server-bound document scope. Nil leaves retrieval unrestricted;
+	// a non-nil empty slice restricts all corpus tools to no documents.
+	DocIDs []string
+	// ConversationKey is the conversation's stable identifier (the chat id). When
+	// set, the compiled-knowledge tools (navigate_tree / graph_explore) record a
+	// dataset-level absence once and drop themselves from the tool list until the
+	// 30-minute mark expires, so the agent stops spending calls on a tool the
+	// corpus cannot satisfy. When empty, a per-run key scopes the decision to this
+	// single ReAct turn. The chat pipeline sets it from the conversation id; see
+	// nav_tool_enablement.go.
+	ConversationKey string
 	// Tools are the eino tools the agent may call. When empty, the tool set of
 	// the resolved template (TemplateID, else the config's default) is used.
 	// The web_search tool is NOT passed here: it is injected from the run's
@@ -81,6 +95,8 @@ type Input struct {
 	// request's agent_mode. It is mandatory: an empty or unknown id fails the
 	// run with a clear error — there is no default/env/first-template fallback.
 	TemplateID string
+	// Template is the per-run resolved configuration, shared with model setup.
+	Template *Template
 	// OnDelta, when non-nil, receives each incremental (content, reasoning)
 	// delta as it streams. When nil, deltas fall back to runtime.EmitAgentMessage.
 	OnDelta func(contentDelta, thinkingDelta string)
@@ -111,6 +127,11 @@ type Input struct {
 const defaultMaxIterations = 120
 
 var errNilModel = errors.New("agentic_rag: model is required")
+
+// runSeq issues a unique key for each Run that carries no ConversationKey, so a
+// disable decision is scoped to that turn and does not collide with a concurrent
+// one.
+var runSeq uint64
 
 // llmRetryMax bounds retry attempts per model call on top of the initial one
 // (adk semantics: MaxRetries=1 → up to 2 calls). With the backoff below the
@@ -292,11 +313,37 @@ func Run(ctx context.Context, in Input) (string, error) {
 	if in.Model == nil {
 		return "", errNilModel
 	}
+	if in.DocIDs != nil {
+		ctx = withDocumentScope(ctx, in.DocIDs)
+	}
 
-	tmpl, errT := resolveTemplateFor(in.TemplateID)
-	if errT != nil {
-		common.ErrorCtx(ctx, "agentic_rag: resolve template", errT)
-		return "", errT
+	// Conversation identity for per-conversation compiled-knowledge tool
+	// availability: the chat pipeline passes the chat id; when absent, a unique
+	// per-run key keeps any availability decision scoped to this turn and
+	// isolated from concurrent runs.
+	convKey := in.ConversationKey
+	generatedKey := convKey == ""
+	if generatedKey {
+		convKey = fmt.Sprintf("run-%d", atomic.AddUint64(&runSeq, 1))
+	}
+	ctx = WithConversationKey(ctx, convKey)
+	if generatedKey {
+		// The generated key belongs to this turn alone: no later run reuses it,
+		// so release its availability marks on the way out instead of leaking
+		// one dead entry per keyless run into the process-wide map.
+		defer forgetConversation(convKey)
+	}
+
+	var tmpl Template
+	if in.Template != nil {
+		tmpl = *in.Template
+	} else {
+		var err error
+		tmpl, err = ResolveTemplate(in.TemplateID, nil)
+		if err != nil {
+			common.ErrorCtx(ctx, "agentic_rag: resolve template", err)
+			return "", err
+		}
 	}
 
 	// Shared per-run duration tally: every tool invocation is timed and
@@ -305,22 +352,59 @@ func Run(ctx context.Context, in Input) (string, error) {
 		in.ToolCallDurations = &durationAccumulator{dur: make(map[string]time.Duration)}
 	}
 
-	tools := in.Tools
-	if len(tools) == 0 {
-		// No explicit tool set: build it from the requested template, which
-		// lets operators change the tool list without recompiling. The config
-		// is reloaded from disk when its mtime changes, so a quick edit +
-		// re-run is enough to try a different tool subset or prompt variant.
-		tools = toolsFor(tmpl, in.TenantID, in.DatasetIDs)
-		// Web search is injected, never declared: the template's tool list
-		// describes the corpus toolset, and a conversation whose context
-		// carries a provider gets one extra tool at run time.
-		tools = append(tools, webSearchTools(ctx)...)
+	// With no explicit tools, use the requested template. The config reloads
+	// when its mtime changes so operators can change the tool list and prompt.
+	tools := toolsForRun(ctx, tmpl, in, engine.Get())
+	agentModel, err := modelForTools(ctx, in.Model, tools, in.DatasetIDs)
+	if err != nil {
+		return "", err
 	}
 
 	maxIter := in.MaxIterations
 	if maxIter <= 0 {
 		maxIter = defaultMaxIterations
+	}
+
+	// ONE claim recall per turn, BEFORE the loop, consumed as a control signal
+	// rather than as prompt text.
+	//
+	// A recall that covers the question needs no document and no chunk: the
+	// claims carry their own verbatim evidence, so the turn terminates on a
+	// single model call over them. Descending the structure again, or reading
+	// the raw chunks they were compiled from, could only re-derive what the
+	// claims already state - and every additional step is another chance to
+	// prune away the branch that holds the answer.
+	//
+	// A recall that does not cover the question is discarded here. The loop then
+	// runs exactly as it would have without the recall, and navigate_structure
+	// stays available for the model to call on demand.
+	if len(in.Tools) == 0 && !tmpl.strictTools {
+		pf := recallCompiledClaims(ctx, in.TenantID, in.DatasetIDs, in.Messages)
+		if pf.sufficient {
+			answer, aerr := answerFromClaims(ctx, synthModelFor(in), tmpl.Content, in.Messages, pf)
+			switch {
+			case aerr != nil:
+				// Falling through keeps the turn answerable: the claims are
+				// dropped from the registry's numbering (nothing was shown) and
+				// the loop retrieves what it needs itself.
+				common.WarnCtx(ctx, "agentic_rag: claim answer failed; falling back to the loop", zap.Error(aerr))
+			case strings.TrimSpace(answer) != "":
+				// The loop is skipped entirely, so this line is the only record
+				// that the turn never read a chunk: a review of tool usage must
+				// be able to tell it from a turn the model gave up on.
+				common.InfoCtx(ctx, "agentic_rag: answered from compiled claims",
+					zap.Int("claims", len(pf.claims)),
+					zap.Int("docs", len(pf.docs)),
+					zap.Int("answer_bytes", len(answer)))
+				emit(ctx, in.OnDelta, answer, "")
+				return answer, nil
+			default:
+				// The claims were judged (or proved) not to answer the question:
+				// the loop retrieves what the claims could not supply.
+				common.InfoCtx(ctx, "agentic_rag: falling back to the loop after an unusable claim answer",
+					zap.Int("claims", len(pf.claims)))
+			}
+		}
 	}
 
 	// Wrap every invokable tool so each call is timed and emitted as a debug
@@ -330,15 +414,39 @@ func Run(ctx context.Context, in Input) (string, error) {
 	wrapped := make([]tool.BaseTool, len(tools))
 	for i, t := range tools {
 		if it, ok := t.(tool.InvokableTool); ok {
-			wrapped[i] = &instrumentedTool{
+			timed := &instrumentedTool{
 				InvokableTool: it,
 				acc:           in.ToolCallDurations,
 			}
+			wrapped[i] = timed
 		} else {
 			wrapped[i] = t
 		}
 	}
 	tools = wrapped
+
+	// Drop compiled-knowledge tools this conversation has already proven
+	// unusable (dataset-level absence), so the model cannot keep calling them
+	// and wasting turns. The tool still short-circuits on its own for any call
+	// that slips through, but removing it from the list is the clean stop.
+	if unavailable := navUnavailableToolSet(ctx); len(unavailable) > 0 {
+		kept := tools[:0]
+		for _, t := range tools {
+			if info, ierr := t.Info(ctx); ierr == nil && info != nil && unavailable[info.Name] {
+				continue
+			}
+			kept = append(kept, t)
+		}
+		tools = kept
+	}
+	names := make([]string, 0, len(tools))
+	for _, t := range tools {
+		if info, err := t.Info(ctx); err == nil && info != nil {
+			names = append(names, info.Name)
+		}
+	}
+	common.InfoCtx(ctx, "agentic_rag: configured runtime tools",
+		zap.String("template", tmpl.ID), zap.Bool("strict_tools", tmpl.strictTools), zap.Strings("tools", names))
 
 	common.DebugCtx(ctx, "agentic_rag: run start",
 		zap.Int("max_iterations", maxIter),
@@ -348,8 +456,8 @@ func Run(ctx context.Context, in Input) (string, error) {
 
 	cfg := &adk.ChatModelAgentConfig{
 		Name:          "smart-reasoning",
-		Instruction:   instructionFor(tmpl),
-		Model:         in.Model,
+		Instruction:   tmpl.Content,
+		Model:         agentModel,
 		MaxIterations: maxIter,
 		// Retry transient provider failures (MiniMax 529 overload, 429, 5xx,
 		// network hiccups) with seconds-scale backoff on EVERY model call of
@@ -384,15 +492,26 @@ func Run(ctx context.Context, in Input) (string, error) {
 
 	// EnableStreaming lives on RunnerConfig, not ChatModelAgentConfig.
 	explorerHead := sess.explorer.head(ctx)
-	question := lastUserQuestion(in.Messages)
+	question := schema.UserMessage(lastUserQuestion(in.Messages))
 	seed := in.Messages
 	if len(seed) > 0 {
+		question = seed[len(seed)-1]
 		// The final user message is the new turn and must be appended exactly
 		// once by turnMessages.
 		seed = seed[:len(seed)-1]
 	}
 	runMessages := sess.explorer.turnMessages(seed, "", question)
-	iter := sess.explorer.runner(ctx, explorerAgent, in.Stream).Run(ctx, runMessages)
+	// Everything the ReAct loop calls the model for is the exploration phase:
+	// the loop is where a turn's token budget is actually spent, so it must be
+	// attributable on its own and not merge into the final synthesis.
+	exploreCtx := tokenizer.WithUsagePhase(ctx, "explore")
+	iter := sess.explorer.runner(exploreCtx, explorerAgent, in.Stream).Run(exploreCtx, runMessages)
+	// Runner assigns IDs to input messages before persisting them. Exclude
+	// these from recovery so a failed turn cannot reuse a historical answer.
+	inputMessageIDs := make(map[string]bool, len(runMessages))
+	for _, msg := range runMessages {
+		inputMessageIDs[adk.GetMessageID(msg)] = true
+	}
 	final, evidence, runErr := consumeAgentEvents(ctx, iter, in.OnDelta, in.ToolCallCounts, in.ToolCallErrors, in.ToolErrorSamples)
 
 	// Recovery, cheapest and most faithful first. A run that ended on a
@@ -403,7 +522,7 @@ func Run(ctx context.Context, in Input) (string, error) {
 	// that tripped the cooldown).
 	if final == "" || runErr != nil {
 		if carried := sess.explorer.lastAssistant(ctx, func(m *schema.Message) bool {
-			return strings.TrimSpace(m.Content) != ""
+			return !inputMessageIDs[adk.GetMessageID(m)] && strings.TrimSpace(m.Content) != ""
 		}); carried != "" {
 			final = carried
 			runErr = nil
@@ -429,11 +548,12 @@ func Run(ctx context.Context, in Input) (string, error) {
 		// by the bounded budget attached here.
 		synthCtx, synthCancel := context.WithTimeout(context.WithoutCancel(ctx), finalizeTimeout)
 		defer synthCancel()
-		synthModel := in.Model
-		if in.SynthModel != nil {
-			synthModel = in.SynthModel
+		synthCtx = tokenizer.WithUsagePhase(synthCtx, "synth")
+		synthMessages := in.Messages
+		if tmpl.customContent {
+			synthMessages = append([]*schema.Message{schema.SystemMessage(tmpl.Content)}, synthMessages...)
 		}
-		synth, synthErr := finalizeAnswer(synthCtx, synthModel, in.Messages, final, evidence)
+		synth, synthErr := finalizeAnswer(synthCtx, synthModelFor(in), synthMessages, final, evidence)
 		if synthErr != nil {
 			// Without this an empty final is completely silent: the run looks
 			// healthy in every other log line and the user simply gets nothing.
@@ -686,6 +806,133 @@ const finalizeTimeout = 90 * time.Second
 // for minutes and blow the client timeout (observed: exactly 300s on q55).
 const finalizeEvidenceMaxRunes = 16000
 
+// claimAnswerTimeout bounds the sufficient-claims answer. It is a single
+// non-streaming call over evidence that was already retrieved, so it needs a
+// fraction of the loop's budget - and a hung provider must not eat the turn.
+const claimAnswerTimeout = 90 * time.Second
+
+// synthModelFor picks the model that answers without tools: the caller's
+// dedicated synthesis instance when it supplied one, else the agent's own model.
+func synthModelFor(in Input) *models.EinoChatModel {
+	if in.SynthModel != nil {
+		return in.SynthModel
+	}
+	return in.Model
+}
+
+// claimAnswerPrompt renders the user message of the sufficient-claims answer.
+//
+// It states the rules the loop would otherwise carry in its system prompt, in
+// the one place they apply: the answer must be built from these claims, each
+// fact line must carry the [ID:n] handle of the passage it came from (the
+// pipeline turns those handles into the reference payload), and nothing may be
+// extrapolated. It deliberately does NOT advertise tools: this call has none, so
+// a model that looks for one would burn its only turn.
+//
+// The reply is a JSON verdict, not prose, because the caller has to act on it:
+// "these claims do not answer the question" is a routing decision (fall back to
+// the loop), and reading it reliably out of free text is not possible. A model
+// that cannot answer from the claims says so here instead of shipping a
+// non-answer, which is exactly what a zero-score benchmark run looked like.
+func claimAnswerPrompt(evidence string) string {
+	var b strings.Builder
+	b.WriteString("### Compiled evidence retrieved for this question\n")
+	b.WriteString("Each line below is one compiled claim: a statement, the verbatim source quote it was compiled from, ")
+	b.WriteString("the chunk that quote came from, and the passage handle `ref=n` it was shown as.\n\n")
+	b.WriteString(evidence)
+	b.WriteString("\n\n### Task\n")
+	b.WriteString("Decide whether this evidence answers the question above, then answer from it.\n")
+	b.WriteString("- If it does: combine claims where the question needs it, and end every line that states a fact with ")
+	b.WriteString("the handle of the claim it came from: `[ID:n]`, where n is that claim's `ref=n` value. Never ")
+	b.WriteString("introduce an entity, date or number that no claim states. Write the answer in the user's language.\n")
+	b.WriteString("- If it does not (wrong topic, or the specific fact the question asks for is absent): do NOT ")
+	b.WriteString("guess and do NOT answer from world knowledge. Report it as not answerable instead.\n")
+	b.WriteString("- Do not call tools and do not narrate what you are about to do: this call is the whole ")
+	b.WriteString("turn, so a plan or a promise to search further is not an answer.\n\n")
+	b.WriteString("Reply with ONE JSON object and nothing else:\n")
+	b.WriteString(`{"answerable": true, "answer": "<the final answer, with [ID:n] handles>"}`)
+	b.WriteString(" or ")
+	b.WriteString(`{"answerable": false, "missing": "<the fact that is absent>"}`)
+	return b.String()
+}
+
+// claimAnswer is the model's verdict on a sufficient-claims recall. answerable
+// false is a real outcome, not an error: it means the gate's relevance floor let
+// through claims that do not actually answer the question, so the caller must
+// fall back to the ordinary loop instead of shipping a non-answer.
+type claimAnswer struct {
+	answerable bool
+	answer     string
+	missing    string
+}
+
+// parseClaimAnswer reads the JSON verdict. A reply that is not the requested
+// object is reported as not answerable: shipping unparsed prose is how a turn
+// with no retrieval ends up scored zero, and one extra loop is far cheaper.
+func parseClaimAnswer(reply string) claimAnswer {
+	obj, ok := decodeJSONObject(reply)
+	if !ok {
+		return claimAnswer{missing: "model did not return the requested JSON verdict"}
+	}
+	out := claimAnswer{missing: stringFromAny(obj["missing"])}
+	if v, ok := obj["answerable"].(bool); ok {
+		out.answerable = v
+	}
+	if s, ok := obj["answer"].(string); ok {
+		out.answer = strings.TrimSpace(s)
+	}
+	if out.answerable && out.answer == "" {
+		out.answerable = false
+	}
+	return out
+}
+
+// answerFromClaims is the termination of a turn whose pre-loop claim recall
+// already covers the question: ONE model call over the claims, with no tools and
+// therefore no raw-chunk read. It returns ("", nil) when the model judged the
+// claims insufficient, which the caller treats as a reason to run the ordinary
+// loop instead.
+func answerFromClaims(
+	ctx context.Context,
+	m *models.EinoChatModel,
+	instruction string,
+	messages []*schema.Message,
+	pf claimPrefetch,
+) (string, error) {
+	if m == nil || strings.TrimSpace(pf.evidence) == "" {
+		return "", nil
+	}
+	// Its own usage phase: the share of turns that never entered the loop is
+	// exactly what a cost comparison against the loop path needs.
+	ctx, cancel := context.WithTimeout(tokenizer.WithUsagePhase(ctx, "claims"), claimAnswerTimeout)
+	defer cancel()
+
+	// The template's instruction goes in as the system message because this path
+	// bypasses the agent that would otherwise carry it: the answer must keep the
+	// same shape and language rules as every other answer this template ships.
+	req := make([]*schema.Message, 0, len(messages)+2)
+	req = append(req, schema.SystemMessage(instruction))
+	req = append(req, messages...)
+	req = append(req, schema.UserMessage(claimAnswerPrompt(pf.evidence)))
+
+	resp, err := m.Generate(ctx, req)
+	if err != nil {
+		return "", err
+	}
+	if resp == nil {
+		return "", nil
+	}
+	verdict := parseClaimAnswer(resp.Content)
+	if !verdict.answerable {
+		common.InfoCtx(ctx, "agentic_rag: claims judged insufficient by the model",
+			zap.Int("claims", len(pf.claims)),
+			zap.Strings("docs", pf.docs),
+			zap.String("missing", truncateForLog(verdict.missing, 200)))
+		return "", nil
+	}
+	return verdict.answer, nil
+}
+
 // finalizeAnswer issues a single deterministic synthesis call so a turn that
 // ended abnormally (empty final, or an error aborted the loop mid-investigation)
 // still returns a grounded answer instead of a blank. It feeds the model the
@@ -715,10 +962,12 @@ func finalizeAnswer(
 		"assumption explicitly, and still provide the computed answer. Do not request any tools " +
 		"and do not hedge with \"I would need\" or \"I could not find\".")
 
-	resp, err := m.Generate(ctx, []*schema.Message{{
+	finalMessages := append([]*schema.Message(nil), messages...)
+	finalMessages = append(finalMessages, &schema.Message{
 		Role:    schema.User,
 		Content: body.String(),
-	}})
+	})
+	resp, err := m.Generate(ctx, finalMessages)
 	if err != nil {
 		return "", err
 	}

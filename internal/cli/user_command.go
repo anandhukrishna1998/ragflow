@@ -2623,12 +2623,7 @@ func (c *CLI) DevUpdateChunkCommand(commandCount int, cmd *Command) (ResponseIf,
 		return nil, fmt.Errorf("invalid JSON body: %w", err)
 	}
 
-	// Add IDs to payload
-	payload["dataset_id"] = datasetID
-	payload["document_id"] = docID
-	payload["chunk_id"] = chunkID
-
-	resp, err := httpClient.Request(commandCount, "POST", "/chunk/update", httpClient.AuthKind(), nil, payload)
+	resp, err := httpClient.Request(commandCount, "PATCH", utils.APIPath("/datasets", datasetID, "documents", docID, "chunks", chunkID), httpClient.AuthKind(), nil, payload)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update chunk: %w", err)
 	}
@@ -3925,4 +3920,18 @@ func (c *CLI) APIShowConcurrencyCommand(commandCount int, cmd *Command) (Respons
 	}
 
 	return HandleCommonDataResponse(resp, "get concurrency")
+}
+
+func (c *CLI) APIShowQuotaCommand(commandCount int, cmd *Command) (ResponseIf, error) {
+	httpClient, err := c.apiModeClient()
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := httpClient.Request(commandCount, "GET", "/system/quota", httpClient.AuthKind(), nil, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get quota: %w", err)
+	}
+
+	return HandleCommonDataResponse(resp, "get quota")
 }
