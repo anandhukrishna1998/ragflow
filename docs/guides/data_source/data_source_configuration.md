@@ -772,19 +772,21 @@ Click **Test connection** with the completed settings, then **Confirm** to creat
 
 ## Mayday
 
-The Mayday data source is used to connect to Mayday (https://www.mayday.fr) and synchronize knowledge base articles and collections to a RAGFlow knowledge base. After configuration, customer support articles and team procedures can be searched and referenced in RAGFlow.
+The Mayday data source connects to the [Mayday Public API](https://mayday-hq.gitbook.io/mayday-public-api) and synchronizes published knowledge base articles to a RAGFlow Dataset. Each language version of an article is stored as a separate Markdown document, titled with the article label; when several languages are synced, the locale is added to the title, for example `Contact (fr-fr)`. Articles without text are skipped. Diagnostics (decision trees) and other content types are not synchronized.
 
-**Permission requirements**: An active Mayday OAuth 2.0 app with read permissions for knowledge base articles and collections.
+Each document carries metadata that metadata filters can use: `content_id`, `locale`, `content_type`, `knowledge_id`, `selfcare_id`, `collection_ids`, and `is_outdated` (`"true"` when the article is marked outdated in Mayday, otherwise `"false"`). For example, the condition `is_outdated` `=` `false` keeps outdated articles out of retrieval.
 
-**Account version requirements**: A Mayday account with API access and valid OAuth 2.0 Client Credentials (`client_id` and `client_secret`).
+**Permission requirements**: Mayday API credentials with the `contents:read` permission. Filtering by collection name also requires `collections:read`.
+
+**Account version requirements**: A Mayday plan with Public API access. Ask your Mayday Customer Success Manager to enable the API, then have an administrator create client credentials under **Admin > Preferences > Integration Catalog > Mayday API**.
 
 **Configuration parameters**:
 
 - **Name**: Customize the name in RAGFlow to identify this Mayday connection.
-- **Client ID**: Fill in the Mayday OAuth client ID.
-- **Client secret**: Fill in the Mayday OAuth client secret.
-- **API base URL**: Fill in the Mayday API base URL (default: `https://api.mayday.fr/v1`).
-- **OAuth token URL**: Fill in the Mayday OAuth 2.0 token endpoint (default: `https://api.mayday.fr/oauth/token`).
-- **Collections**: Optional. Comma-separated collection IDs or names to limit synchronization scope. Leave blank to sync all collections.
-- **Languages**: Optional. Comma-separated language codes (e.g., `fr`, `en`) to filter articles. Leave blank to sync all languages.
-- **Sync deleted files**: After this is enabled, articles deleted or removed from Mayday are automatically tombstoned and removed from the knowledge base index.
+- **Client ID**: Fill in the Mayday API client ID.
+- **Client secret**: Fill in the Mayday API client secret.
+- **API base URL**: Optional. The Mayday Public API URL. The default value is `https://public-api.mayday.fr`.
+- **OAuth token URL**: Optional. The Mayday OAuth 2.0 token endpoint. The default value is `https://public-api.mayday.fr/auth/oauth2/token`.
+- **Collections**: Optional. Comma-separated collection IDs or collection names; IDs and names can be mixed. Articles in sub-collections are included. Names are matched case-insensitively against each language's collection labels. When Languages is set, every name must exist in every listed language. When Languages is blank, a language whose labels contain none of the names is skipped, and each name must exist in at least one language. Leave blank to sync all collections.
+- **Languages**: Optional. Comma-separated Mayday locales, for example `fr-fr, en-gb` (`fr_FR` is accepted too). Supported locales: `fr-fr`, `en-gb`, `en-us`, `de-de`, `es-es`, `it-it`, `pt-pt`, `nl-nl`, `pl-pl`, `ja-jp`, `pt-br`, `hr-hr`, `cs-cz`, `hu-hu`, `en-in`, `es-mx`, `ro-ro`, `ru-ru`, `uk-ua`, `tr-tr`, `sr-rs`, and `sk-sk`. Leave blank to sync every language that has published articles; RAGFlow detects them at every sync and every deleted-file cleanup. Changing Languages or Collections applies to articles edited afterwards; rebuild the data source in the Dataset to import the existing articles of a newly added language or collection.
+- **Sync deleted files**: After this is enabled, articles that are deleted, unpublished, moved out of the configured collections, or left without text in Mayday are removed from the Dataset. To protect the Dataset from an empty response during a Mayday outage, the cleanup is skipped when no synced language lists a published article.

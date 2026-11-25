@@ -1565,7 +1565,11 @@ This auto-tagging feature enhances retrieval by adding another layer of domain-s
       dataSourceFieldMaydayBaseUrl: 'API base URL',
       dataSourceFieldMaydayTokenUrl: 'OAuth token URL',
       dataSourceFieldMaydayCollections: 'Collections',
+      dataSourceFieldMaydayCollectionsTip:
+        'Optional. Comma-separated collection IDs or names; sub-collections are included. Leave blank to sync all collections.',
       dataSourceFieldMaydayLanguages: 'Languages',
+      dataSourceFieldMaydayLanguagesTip:
+        'Optional. Comma-separated Mayday locales such as fr-fr or en-gb. Leave blank to sync every language that has published articles.',
       dataSourceFieldContent: 'Content',
       dataSourceFieldDatabase: 'Database',
       dataSourceFieldSqlQuery: 'SQL Query',

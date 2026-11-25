@@ -24,7 +24,7 @@ RAGFlow supports many data sources. It is recommended to first select a major ca
 
 **Email, messages, and collaborative communication**: Used to synchronize emails, channel messages, and team discussion content. This category is suitable for customer service communication, business correspondence, and collaborative record queries. It includes Gmail, Outlook, IMAP, Microsoft Teams, Slack, and Discord.
 
-**Business systems and tables**: Used to synchronize CRM, tickets, online tables, courses, or operation records. This category is suitable for building business ledgers and service Datasets. It includes Salesforce, Airtable, Dingtalk AI Table, Zendesk, and Moodle.
+**Business systems and tables**: Used to synchronize CRM, tickets, online tables, courses, or operation records. This category is suitable for building business ledgers and service Datasets. It includes Salesforce, Airtable, Dingtalk AI Table, Zendesk, Mayday, and Moodle.
 
 **General APIs and subscriptions**: Used to connect custom APIs, X search results, or public subscription feeds. This category is suitable for business systems without standard connectors and for collecting public content. It includes REST API, Xquik, RSS, and Sitemap.
 

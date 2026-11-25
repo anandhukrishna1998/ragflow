@@ -72,7 +72,6 @@ export default {
       bedrockCredentialsHint:
         '提示：ACCESS KEY / SECRET KEY 可留空，以启用 AWS IAM 自动验证。',
       zendeskDescription: '连接 Zendesk，同步工单、文章及其他内容。',
-      maydayDescription: '连接 Mayday 知识库，同步客户服务文章和合集。',
       promptPlaceholder: '请输入或使用 / 快速插入变量。',
       selected: '已选择',
       seeAll: '查看全部',
@@ -1560,7 +1559,11 @@ NER：使用 spaCy NER 和基于规则的关键词提取来抽取 Entities 和 R
       dataSourceFieldMaydayBaseUrl: 'API 基础 URL',
       dataSourceFieldMaydayTokenUrl: 'OAuth 令牌 URL',
       dataSourceFieldMaydayCollections: '合集',
+      dataSourceFieldMaydayCollectionsTip:
+        '可选。以逗号分隔的合集 ID 或名称，包含子合集。留空则同步全部合集。',
       dataSourceFieldMaydayLanguages: '语言',
+      dataSourceFieldMaydayLanguagesTip:
+        '可选。以逗号分隔的 Mayday 语言代码，例如 fr-fr、en-gb。留空则同步所有包含已发布文章的语言。',
       dataSourceFieldContent: '内容',
       dataSourceFieldDatabase: '数据库',
       dataSourceFieldSqlQuery: 'SQL 查询',
@@ -1729,6 +1732,7 @@ NER：使用 spaCy NER 和基于规则的关键词提取来抽取 Entities 和 R
       dropboxAccessTokenTip:
         '请在 Dropbox App Console 生成 Access Token，并勾选 files.metadata.read、files.content.read、sharing.read 等必要权限。',
       jiraDescription: '接入 Jira 工作区，持续同步Issues、评论与附件。',
+      maydayDescription: '连接 Mayday 知识库，同步客户服务文章和合集。',
       jiraBaseUrlTip:
         'Jira 的 Base URL，例如：https://your-domain.atlassian.net。',
       jiraProjectKeyTip: '可选：仅同步指定的项目（如 RAG）。',

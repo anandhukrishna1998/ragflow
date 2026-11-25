@@ -348,13 +348,15 @@ func syncDocumentFilename(name, extension, fallback string) string {
 		return name
 	}
 
+	// Cut on a byte limit but drop a character split by the cut, since an
+	// invalid UTF-8 name is rejected by the database.
 	ext := filepath.Ext(name)
 	baseLimit := 255 - len(ext)
 	if baseLimit < 1 {
-		return name[:255]
+		return strings.ToValidUTF8(name[:255], "")
 	}
 
-	return name[:baseLimit] + ext
+	return strings.ToValidUTF8(name[:baseLimit], "") + ext
 }
 
 // syncDocumentStagedLocation returns a unique object-storage key for unpublished synced content.

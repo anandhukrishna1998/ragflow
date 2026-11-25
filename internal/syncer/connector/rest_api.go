@@ -121,7 +121,7 @@ func (e *RateLimitTriedTooManyTimesError) Error() string { return e.Message }
 // ErrPruneUnsupported is returned by OpenPrune for connectors that do not
 // support deleted-file pruning; prune tasks then complete without deleting
 // anything.
-var ErrPruneUnsupported = errors.New("rest API connector does not support prune")
+var ErrPruneUnsupported = errors.New("connector does not support prune")
 
 // Retry/backoff knobs for page fetches and rate limiting. They are package
 // variables so tests can shrink the delays.

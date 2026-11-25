@@ -70,6 +70,49 @@ describe('Xquik data source', () => {
   });
 });
 
+describe('Mayday data source', () => {
+  it('registers its catalog entry and defaults', () => {
+    const info = generateDataSourceInfo(translate)[DataSourceKey.MAYDAY];
+    const defaults = DataSourceFormDefaultValues[DataSourceKey.MAYDAY];
+
+    expect(info.name).toBe('Mayday');
+    expect(info.description).toBe('setting.maydayDescription');
+    expect(defaults).toEqual({
+      name: '',
+      source: 'mayday',
+      config: {
+        base_url: '',
+        token_url: '',
+        collections: '',
+        languages: '',
+        credentials: { client_id: '', client_secret: '' },
+      },
+    });
+  });
+
+  it('requires only the credentials and keeps the secret hidden', () => {
+    const fields = getDataSourceFieldsWithExtras(
+      translate,
+      DataSourceKey.MAYDAY,
+    ) as Array<{ name: string; type?: FormFieldType; required?: boolean }>;
+    const required = fields
+      .filter((field) => field.required)
+      .map((field) => field.name);
+    const secret = fields.find(
+      (field) => field.name === 'config.credentials.client_secret',
+    );
+
+    expect(required).toEqual([
+      'config.credentials.client_id',
+      'config.credentials.client_secret',
+    ]);
+    expect(secret?.type).toBe(FormFieldType.Password);
+    expect(fields.map((field) => field.name)).toEqual(
+      expect.arrayContaining(['config.collections', 'config.languages']),
+    );
+  });
+});
+
 describe('Sitemap data source', () => {
   it('registers its catalog entry and defaults', () => {
     const info = generateDataSourceInfo(translate)[DataSourceKey.SITEMAP];
